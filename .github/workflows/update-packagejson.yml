@@ -1,0 +1,110 @@
+name: Update package.json
+
+on:
+  workflow_call:
+    inputs:
+      file-path:
+        description: "package.json path to update. You can input multiline paths."
+        required: true
+        type: string
+      tag:
+        description: "git tag you want create. (e.g. 1.0.0)"
+        required: true
+        type: string
+      push-tag:
+        description: "true = push tag. false = no push tag."
+        required: false
+        type: boolean
+        default: true
+      dry-run:
+        description: "true to simularate commit but not push change."
+        required: true
+        type: boolean
+    outputs:
+      sha:
+        description: "Git commit sha after package.json has changed."
+        value: ${{ jobs.update-packagejson.outputs.sha }}
+      branch-name:
+        description: Git branch name created.
+        value: ${{ jobs.update-packagejson.outputs.branch-name }}
+      is-branch-created:
+        description: Indicate is Git branch created or not.
+        value: ${{ jobs.update-packagejson.outputs.is-branch-created }}
+
+env:
+  DRY_RUN_BRANCH_PREFIX: "test_release"
+
+jobs:
+  update-packagejson:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+      branch-name: ${{ steps.env.outputs.branch-name }}
+      is-branch-created: ${{ steps.env.outputs.is-branch-created }}
+    steps:
+      - name: Configure environment variables
+        id: env
+        run: |
+          echo "GIT_TAG=${{ inputs.tag }}" | tee -a "$GITHUB_ENV"
+          echo "DRY_RUN=${{ inputs.dry-run }}" | tee -a "$GITHUB_ENV"
+          echo "branch-name=${{ env.DRY_RUN_BRANCH_PREFIX }}-${{ inputs.tag }}" | tee -a "$GITHUB_OUTPUT"
+          echo "is-branch-created=${{ inputs.dry-run }}" | tee -a "$GITHUB_OUTPUT"
+      - name: Checkout repository 
+        uses: actions/checkout@v3
+      - name: Print package.json before update
+        run: |
+          inputs="${{ inputs.file-path }}"
+          IFS=$'\n'
+          for file in $inputs; do
+            echo "Showing package.json for $file (Before)"
+            cat "$file"
+          done
+      - name: Update package.json to version ${{ env.GIT_TAG }}
+        run: |
+          inputs="${{ inputs.file-path }}"
+          IFS=$'\n'
+          for file in $inputs; do
+            echo "Updating package.json for $file"
+            sed -i -e "s/\(\"version\":\) \"\(.*\)\",/\1 \"${{ env.GIT_TAG }}\",/" ${file}
+          done
+      - name: Print package.json after updated
+        run: |
+          inputs="${{ inputs.file-path }}"
+          IFS=$'\n'
+          for line in $inputs; do
+            echo "Showing package.json for $line (After)"
+            cat "$line"
+          done
+      - name: Check update
+        id: check_update
+        run: git diff --exit-code || echo "changed=1" | tee -a "$GITHUB_OUTPUT"
+      - name: Commit files
+        id: commit
+        if: ${{ steps.check_update.outputs.changed == '1' }}
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git commit -m "feat: Update package.json to ${{ env.GIT_TAG }}" -a
+          echo "sha=$(git rev-parse HEAD)" | tee -a "$GITHUB_OUTPUT"
+      - name: Check sha
+        run: echo "SHA ${SHA}"
+        env:
+          SHA: ${{ steps.commit.outputs.sha }}
+      - name: Create Tag
+        if: ${{ steps.check_update.outputs.changed == '1' && inputs.push-tag }}
+        run: git tag ${{ env.GIT_TAG }}
+      - name: Push changes
+        if: ${{ env.DRY_RUN == 'false' && steps.check_update.outputs.changed == '1' }}
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}
+          tags: ${{ inputs.push-tag }}
+      - name: Push changes (dry-run)
+        if: ${{ env.DRY_RUN == 'true' && steps.check_update.outputs.changed == '1' }}
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ steps.env.outputs.branch-name }}
+          tags: false
