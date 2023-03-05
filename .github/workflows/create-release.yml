@@ -1,0 +1,87 @@
+name: Create release
+
+on:
+  workflow_call:
+    inputs:
+      commit-id:
+        description: "commit id to craete release and tag."
+        required: true
+        type: string
+      tag:
+        description: "git tag you want create. (e.g. 1.0.0)"
+        required: true
+        type: string
+      push-tag:
+        description: "true = push tag. false = no push tag."
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: "true = mark prerelease. false = mark full release."
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: "true = create drafg. false = publish."
+        required: false
+        type: boolean
+        default: false
+      unitypackage-upload:
+        description: "true = upload unitypackage. false = not upload."
+        required: false
+        type: boolean
+        default: false
+      unitypackage-name:
+        description: "unitypackage name to uploaded."
+        required: true
+        type: string
+      unitypackage-path:
+        description: "unitypackage path to upload."
+        required: true
+        type: string
+      dry-run:
+        description: "true = dry run changes. false = create release."
+        required: true
+        type: boolean
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.commit-id }}
+        if: ${{ inputs.push-tag }}
+      - name: Create Tag
+        run: |
+          git tag ${{ inputs.tag }}
+          git push origin ${{ inputs.tag }}
+        if: ${{ inputs.push-tag }}
+      - name: Download artifact
+        uses: actions/download-artifact@v3
+      - name: Print downloaded aritifacts
+        run: ls -lR
+      - name: Create release
+        uses: actions/create-release@v1
+        id: create_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ inputs.tag }}
+          release_name: Ver.${{ inputs.tag }}
+          commitish: ${{ inputs.commit-id }}
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+        if: ${{ !inputs.dry-run }}
+      - name: Upload unitypackage
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_name: ${{ inputs.unitypackage-name }}
+          asset_path: ${{ inputs.unitypackage-path }}
+          asset_content_type: application/octet-stream
+        if: ${{ !inputs.dry-run && inputs.unitypackage-upload }}
